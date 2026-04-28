@@ -41,7 +41,7 @@ const Cloud = (p) => <Icon {...p} d={<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 
 const SHOP_NAME = 'Expert Repair';
 const SHOP_LOCATION = 'Berlin';
 const WARRANTY_MONTHS = 6;
-const TRACKING_BASE_URL = window.location.origin + '/track';
+const TRACKING_BASE_URL = window.location.origin + '/track.html';
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CXc8tGqEXAMPLE/review';
 
 const PIN_STORAGE_KEY = 'expert-repair-pin';
@@ -218,10 +218,12 @@ const waTemplates = (job, customer, lang) => {
 };
 
 const waLink = (phone, text) => {
-  const cleaned = phone.replace(/[^\d+]/g, '').replace(/^\+/, '');
-  return `https://wa.me/${cleaned}?text=${encodeURIComponent(text)}`;
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    if (cleaned.startsWith('+')) cleaned = cleaned.substring(1);
+    else if (cleaned.startsWith('00')) cleaned = cleaned.substring(2);
+    else if (cleaned.startsWith('0')) cleaned = '49' + cleaned.substring(1);
+    return `https://wa.me/${cleaned}?text=${encodeURIComponent(text)}`;
 };
-
 function App() {
   // === Normaler Mitarbeiter-Modus ===
   const [role, setRole] = useState(() => localStorage.getItem(ROLE_STORAGE_KEY) || null);
