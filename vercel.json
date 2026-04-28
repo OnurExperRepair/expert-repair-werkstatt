@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "headers": [
+    {
+      "source": "/manifest.json",
+      "headers": [{ "key": "Content-Type", "value": "application/manifest+json" }]
+    },
+    {
+      "source": "/app.jsx",
+      "headers": [{ "key": "Content-Type", "value": "text/jsx" }]
+    }
+  ]
+}
+
