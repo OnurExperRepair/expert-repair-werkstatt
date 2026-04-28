@@ -1,21 +1,19 @@
+// Vercel Serverless Function — Datenbank-Operationen
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-async function sb(path, options = {}) {
-  const url = `${SUPABASE_URL}/rest/v1${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'apikey': SUPABASE_KEY,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-      ...options.headers,
-    },
-  });
+async function supabase(path, options = {}) {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': options.prefer || 'return=representation',
+  };
+  const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Supabase ${res.status}: ${errText}`);
+    const text = await res.text();
+    throw new Error(`Supabase ${res.status}: ${text}`);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -49,34 +47,44 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Supabase-Verbindung fehlt' });
   }
 
-  const { action, payload } = req.body || {};
-
   try {
-    switch (action) {
+    const { action, ...payload } = req.body || {};
 
+    switch (action) {
       case 'load_all': {
         const [customers, jobs, history, rejected] = await Promise.all([
-          sb('/customers?select=*&order=created_at.desc'),
-          sb('/jobs?select=*&order=created_at.desc'),
-          sb('/job_history?select=*&order=created_at.desc'),
-          sb('/rejected_diagnoses?select=*&order=created_at.desc'),
+          supabase('customers?order=created_at.desc'),
+          supabase('jobs?order=created_at.desc'),
+          supabase('job_history?order=created_at.desc'),
+          supabase('rejected_diagnoses?order=created_at.desc'),
         ]);
-        return res.status(200).json({ customers, jobs, history, rejected });
+        const jobsWithHistory = jobs.map(j => ({
+          ...j,
+          history: history.filter(h => h.job_id === j.id).map(h => ({
+            status: h.status, note: h.note, at: new Date(h.created_at).getTime(),
+          })),
+        }));
+        return res.status(200).json({ customers, jobs: jobsWithHistory, rejected });
       }
 
       case 'create_customer': {
-        const { name, phone, language, isReturning } = payload;
-        const result = await sb('/customers', {
+        const c = await supabase('customers', {
           method: 'POST',
-          body: JSON.stringify({ name, phone, language, is_returning: isReturning || false }),
+          body: JSON.stringify({
+            name: payload.name,
+            phone: payload.phone,
+            notes: payload.notes || '',
+            language: payload.language || 'de',
+          }),
         });
-        return res.status(200).json(result[0]);
+        return res.status(200).json(c[0]);
       }
 
       case 'create_job': {
-        let imageUrl = payload.imageUrl || null;
-        if (payload.imageBase64) {
-          const fileName = `before_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
+        let imageUrl = null;
+        if (payload.imageBase64 && payload.imageMediaType) {
+          const ext = payload.imageMediaType.split('/')[1] || 'jpg';
+          const fileName = `before_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
           imageUrl = await uploadImage(payload.imageBase64, payload.imageMediaType, fileName);
         }
 
@@ -98,63 +106,64 @@ export default async function handler(req, res) {
           ai_warning: payload.ai_warning || null,
         };
 
-        const result = await sb('/jobs', {
+        const j = await supabase('jobs', {
           method: 'POST',
           body: JSON.stringify(jobData),
         });
 
-        await sb('/job_history', {
+        await supabase('job_history', {
           method: 'POST',
           body: JSON.stringify({
-            job_id: result[0].id,
+            job_id: j[0].id,
             status: 'eingegangen',
             note: 'Auftrag angelegt',
           }),
         });
 
-        return res.status(200).json(result[0]);
+        return res.status(200).json(j[0]);
       }
 
       case 'update_job_status': {
         const { jobId, status, note } = payload;
-        const result = await sb(`/jobs?id=eq.${jobId}`, {
+        const j = await supabase(`jobs?id=eq.${jobId}`, {
           method: 'PATCH',
           body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
         });
-        await sb('/job_history', {
+        await supabase('job_history', {
           method: 'POST',
           body: JSON.stringify({ job_id: jobId, status, note: note || '' }),
         });
-        return res.status(200).json(result[0]);
+        return res.status(200).json(j[0]);
       }
 
       case 'update_job_notes': {
         const { jobId, notes } = payload;
-        const result = await sb(`/jobs?id=eq.${jobId}`, {
+        const j = await supabase(`jobs?id=eq.${jobId}`, {
           method: 'PATCH',
           body: JSON.stringify({ notes, updated_at: new Date().toISOString() }),
         });
-        return res.status(200).json(result[0]);
+        return res.status(200).json(j[0]);
       }
 
       case 'upload_after_image': {
         const { jobId, imageBase64, imageMediaType } = payload;
-        const fileName = `after_${jobId}_${Date.now()}.jpg`;
+        const ext = imageMediaType.split('/')[1] || 'jpg';
+        const fileName = `after_${jobId}_${Date.now()}.${ext}`;
         const imageUrl = await uploadImage(imageBase64, imageMediaType, fileName);
-        const result = await sb(`/jobs?id=eq.${jobId}`, {
+        const j = await supabase(`jobs?id=eq.${jobId}`, {
           method: 'PATCH',
           body: JSON.stringify({ after_image_url: imageUrl, updated_at: new Date().toISOString() }),
         });
-        return res.status(200).json(result[0]);
+        return res.status(200).json(j[0]);
       }
 
       case 'reject_diagnosis': {
         const { device, diagnosis, reason, customer_phone } = payload;
-        const result = await sb('/rejected_diagnoses', {
+        const r = await supabase('rejected_diagnoses', {
           method: 'POST',
           body: JSON.stringify({ device, diagnosis, reason, customer_phone }),
         });
-        return res.status(200).json(result[0]);
+        return res.status(200).json(r[0]);
       }
 
       default:
