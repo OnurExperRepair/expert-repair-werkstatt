@@ -746,7 +746,7 @@ function Home({ role, jobs, customers, rejected = [], onNew, onList, onJob }) {
     const q = quickSearch.toLowerCase().replace('#', '');
     return jobs.filter(j => {
       const c = customers.find(c => c.id === j.customer_id);
-      return j.id.toLowerCase().includes(q) ||
+      return String(j.id).toLowerCase().includes(q) ||
         j.device.toLowerCase().includes(q) ||
         (c && (c.name.toLowerCase().includes(q) || c.phone.includes(q)));
     }).slice(0, 6);
@@ -1338,7 +1338,7 @@ function JobList({ jobs, customers, onJob, onBack }) {
     const q = search.toLowerCase();
     filtered = filtered.filter(j => {
       const c = customers.find(c => c.id === j.customer_id);
-      return j.device.toLowerCase().includes(q) || j.id.toLowerCase().includes(q) ||
+      return j.device.toLowerCase().includes(q) || String(j.id).toLowerCase().includes(q) ||
         (c && (c.name.toLowerCase().includes(q) || c.phone.includes(q)));
     });
   }
