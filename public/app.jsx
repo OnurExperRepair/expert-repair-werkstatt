@@ -207,7 +207,7 @@ const buildTemplate = (key, lang, ctx) => {
 
 const waTemplates = (job, customer, lang) => {
   const ctx = { first: customer.name.split(' ')[0], device: job.device, repair: job.repair,
-    price: priceStr(job), duration: job.duration, id: job.id.toUpperCase(),
+    price: priceStr(job), duration: job.duration, id: String(job.id).toUpperCase(),
     tracking: trackingUrl(job.id), review: GOOGLE_REVIEW_URL };
   const labels = TEMPLATE_LABELS[lang] || TEMPLATE_LABELS.de;
   const out = {};
@@ -784,7 +784,7 @@ function Home({ role, jobs, customers, rejected = [], onNew, onList, onJob }) {
                   <Icon size={14} style={{ color: s.color, flexShrink: 0 }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm flex items-center gap-2">
-                      <span className="mono" style={{ color: '#e8904b' }}>#{j.id.toUpperCase()}</span>
+                      <span className="mono" style={{ color: '#e8904b' }}>#{String(j.id).toUpperCase()}</span>
                       <span className="truncate">{j.device}</span>
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: '#857d70' }}>{c?.name} · {s.label}</div>
@@ -897,7 +897,7 @@ function JobRow({ job, customer, onClick }) {
         <div className="text-xs flex items-center gap-2" style={{ color: '#857d70' }}>
           <span className="truncate">{customer?.name || 'Kunde'}</span>
           <span>·</span>
-          <span className="mono">#{job.id.toUpperCase()}</span>
+          <span className="mono">#{String(job.id).toUpperCase()}</span>
           <span>·</span>
           <span>{formatRelative(job.updated_at)}</span>
         </div>
@@ -1429,7 +1429,7 @@ function JobDetail({ job, customer, role, onBack, onUpdateStatus, onUpdateNotes,
       <div className="flex items-start gap-4 mb-2">
         {job.image && <img src={job.image} alt="" className="w-20 h-20 rounded-md object-cover flex-shrink-0" style={{ border: '1px solid #2a2620' }} />}
         <div className="flex-1 min-w-0">
-          <div className="mono text-[10px] uppercase tracking-widest" style={{ color: '#857d70' }}>Auftrag #{job.id.toUpperCase()}</div>
+          <div className="mono text-[10px] uppercase tracking-widest" style={{ color: '#857d70' }}>Auftrag #{String(job.id).toUpperCase()}</div>
           <div className="text-2xl display-serif mt-1 mb-2">{job.device}</div>
           <div className="flex flex-wrap gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded" style={{ background: s.bg }}>
@@ -1774,7 +1774,7 @@ function AnnahmescheinPrint({ job, customer }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '14px', fontWeight: 'bold' }}>ANNAHMESCHEIN</div>
-          <div style={{ fontSize: '20px', fontFamily: 'monospace', marginTop: '4px' }}>#{job.id.toUpperCase()}</div>
+          <div style={{ fontSize: '20px', fontFamily: 'monospace', marginTop: '4px' }}>#{String(job.id).toUpperCase()}</div>
           <div style={{ fontSize: '11px', marginTop: '2px' }}>Datum: {formatDateOnly(job.created_at)}</div>
         </div>
       </div>
@@ -2006,7 +2006,7 @@ function PublicTracking({ job, customer, onExit }) {
           <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: '#857d70', fontFamily: "'JetBrains Mono', monospace" }}>{t.device}</div>
           <div className="text-xl mb-3">{job.device}</div>
           <div className="text-[10px] uppercase tracking-widest mb-1" style={{ color: '#857d70', fontFamily: "'JetBrains Mono', monospace" }}>{t.order}</div>
-          <div className="text-sm" style={{ fontFamily: "'JetBrains Mono', monospace", color: '#e8904b' }}>#{job.id.toUpperCase()}</div>
+          <div className="text-sm" style={{ fontFamily: "'JetBrains Mono', monospace", color: '#e8904b' }}>#{String(job.id).toUpperCase()}</div>
         </div>
 
         <div className="p-5 rounded-md mb-6" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
