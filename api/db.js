@@ -1,21 +1,21 @@
-// Vercel Serverless Function — Datenbank-Operationen
-// Alles geht über diesen Endpunkt mit Aktions-Parameter
-
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-async function supabase(path, options = {}) {
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${SUPABASE_KEY}`,
-    'Content-Type': 'application/json',
-    'Prefer': options.prefer || 'return=representation',
-  };
-  const res = await fetch(url, { ...options, headers });
+async function sb(path, options = {}) {
+  const url = `${SUPABASE_URL}/rest/v1${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      ...options.headers,
+    },
+  });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase ${res.status}: ${text}`);
+    const errText = await res.text();
+    throw new Error(`Supabase ${res.status}: ${errText}`);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -28,179 +28,140 @@ async function uploadImage(base64Data, mediaType, fileName) {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'apikey': SUPABASE_KEY,
       'Content-Type': mediaType,
       'x-upsert': 'true',
+      'cache-control': 'public, max-age=3600',
     },
     body: buffer,
   });
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Upload failed: ${res.status} - ${errText}`);
+  }
   return `${SUPABASE_URL}/storage/v1/object/public/repair-images/${fileName}`;
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const requiredPin = process.env.SHOP_PIN;
-  if (requiredPin && req.headers['x-shop-pin'] !== requiredPin) {
-    return res.status(401).json({ error: 'PIN falsch' });
-  }
-
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return res.status(500).json({ error: 'Supabase-Verbindung fehlt' });
   }
 
-  try {
-    const { action, ...payload } = req.body;
+  const { action, payload } = req.body || {};
 
+  try {
     switch (action) {
-      // === LADEN ===
+
       case 'load_all': {
         const [customers, jobs, history, rejected] = await Promise.all([
-          supabase('customers?order=created_at.desc'),
-          supabase('jobs?order=created_at.desc'),
-          supabase('job_history?order=created_at.desc'),
-          supabase('rejected_diagnoses?order=created_at.desc'),
+          sb('/customers?select=*&order=created_at.desc'),
+          sb('/jobs?select=*&order=created_at.desc'),
+          sb('/job_history?select=*&order=created_at.desc'),
+          sb('/rejected_diagnoses?select=*&order=created_at.desc'),
         ]);
-        // Historie zu jedem Job zuordnen
-        const jobsWithHistory = jobs.map(j => ({
-          ...j,
-          history: history.filter(h => h.job_id === j.id).map(h => ({
-            status: h.status, note: h.note, at: new Date(h.created_at).getTime(),
-          })),
-        }));
-        return res.status(200).json({ customers, jobs: jobsWithHistory, rejected });
+        return res.status(200).json({ customers, jobs, history, rejected });
       }
 
-      // === KUNDEN ===
       case 'create_customer': {
-        const c = await supabase('customers', {
+        const { name, phone, language, isReturning } = payload;
+        const result = await sb('/customers', {
           method: 'POST',
-          body: JSON.stringify({
-            name: payload.name, phone: payload.phone,
-            notes: payload.notes || '', language: payload.language || 'de',
-          }),
+          body: JSON.stringify({ name, phone, language, is_returning: isReturning || false }),
         });
-        return res.status(200).json(c[0]);
+        return res.status(200).json(result[0]);
       }
 
-      // === AUFTRÄGE ===
       case 'create_job': {
-        let imageUrl = null;
-        if (payload.imageBase64 && payload.imageMediaType) {
-          const ext = payload.imageMediaType.split('/')[1] || 'jpg';
-          const fileName = `before/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        let imageUrl = payload.imageUrl || null;
+        if (payload.imageBase64) {
+          const fileName = `before_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
           imageUrl = await uploadImage(payload.imageBase64, payload.imageMediaType, fileName);
         }
 
-        const job = await supabase('jobs', {
+        const jobData = {
+          customer_id: payload.customer_id,
+          device: payload.device,
+          issue_summary: payload.issue_summary,
+          diagnosis_full: payload.diagnosis_full,
+          price_estimate: payload.price_estimate,
+          time_estimate: payload.time_estimate,
+          status: 'eingegangen',
+          before_image_url: imageUrl,
+          after_image_url: null,
+          notes: payload.notes || '',
+          deposit: payload.deposit || 0,
+          warranty_months: 6,
+          warranty_until: new Date(Date.now() + 6 * 30 * 24 * 60 * 60 * 1000).toISOString(),
+          functional_test: payload.functional_test || null,
+          ai_warning: payload.ai_warning || null,
+        };
+
+        const result = await sb('/jobs', {
+          method: 'POST',
+          body: JSON.stringify(jobData),
+        });
+
+        await sb('/job_history', {
           method: 'POST',
           body: JSON.stringify({
-            customer_id: payload.customer_id,
-            device: payload.device,
-            device_type: payload.device_type || null,
-            damage: payload.damage,
-            repair: payload.repair,
-            price_min: payload.price_min || 0,
-            price_max: payload.price_max || 0,
-            duration: payload.duration,
-            deposit: payload.deposit || 0,
+            job_id: result[0].id,
             status: 'eingegangen',
-            image_url: imageUrl,
-            diagnosis_data: payload.diagnosis_data || null,
-            warranty_until: new Date(Date.now() + 86400000 * 30 * 6).toISOString(),
+            note: 'Auftrag angelegt',
           }),
         });
 
-        const historyNote = payload.deposit > 0
-          ? `Auftrag angelegt · Anzahlung ${payload.deposit}€ erhalten`
-          : 'Auftrag angelegt';
-        await supabase('job_history', {
-          method: 'POST',
-          body: JSON.stringify({
-            job_id: job[0].id, status: 'eingegangen', note: historyNote,
-          }),
-        });
-
-        return res.status(200).json(job[0]);
+        return res.status(200).json(result[0]);
       }
 
       case 'update_job_status': {
-        const { id, status, note } = payload;
-        await supabase(`jobs?id=eq.${id}`, {
+        const { jobId, status, note } = payload;
+        const result = await sb(`/jobs?id=eq.${jobId}`, {
           method: 'PATCH',
           body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
         });
-        await supabase('job_history', {
+        await sb('/job_history', {
           method: 'POST',
-          body: JSON.stringify({ job_id: id, status, note: note || status }),
+          body: JSON.stringify({ job_id: jobId, status, note: note || '' }),
         });
-        return res.status(200).json({ ok: true });
+        return res.status(200).json(result[0]);
       }
 
       case 'update_job_notes': {
-        const { id, technician_notes } = payload;
-        await supabase(`jobs?id=eq.${id}`, {
+        const { jobId, notes } = payload;
+        const result = await sb(`/jobs?id=eq.${jobId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ technician_notes, updated_at: new Date().toISOString() }),
+          body: JSON.stringify({ notes, updated_at: new Date().toISOString() }),
         });
-        return res.status(200).json({ ok: true });
-      }
-
-      case 'update_job_parts_notes': {
-        const { id, parts_notes } = payload;
-        await supabase(`jobs?id=eq.${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ parts_notes, updated_at: new Date().toISOString() }),
-        });
-        return res.status(200).json({ ok: true });
+        return res.status(200).json(result[0]);
       }
 
       case 'upload_after_image': {
-        const { id, imageBase64, imageMediaType } = payload;
-        const ext = imageMediaType.split('/')[1] || 'jpg';
-        const fileName = `after/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { jobId, imageBase64, imageMediaType } = payload;
+        const fileName = `after_${jobId}_${Date.now()}.jpg`;
         const imageUrl = await uploadImage(imageBase64, imageMediaType, fileName);
-        await supabase(`jobs?id=eq.${id}`, {
+        const result = await sb(`/jobs?id=eq.${jobId}`, {
           method: 'PATCH',
-          body: JSON.stringify({ image_after_url: imageUrl, updated_at: new Date().toISOString() }),
+          body: JSON.stringify({ after_image_url: imageUrl, updated_at: new Date().toISOString() }),
         });
-        return res.status(200).json({ image_after_url: imageUrl });
+        return res.status(200).json(result[0]);
       }
 
       case 'reject_diagnosis': {
-        let imageUrl = null;
-        if (payload.imageBase64 && payload.imageMediaType) {
-          const ext = payload.imageMediaType.split('/')[1] || 'jpg';
-          const fileName = `rejected/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-          imageUrl = await uploadImage(payload.imageBase64, payload.imageMediaType, fileName);
-        }
-        const r = await supabase('rejected_diagnoses', {
+        const { device, diagnosis, reason, customer_phone } = payload;
+        const result = await sb('/rejected_diagnoses', {
           method: 'POST',
-          body: JSON.stringify({
-            customer_id: payload.customer_id,
-            device: payload.device, repair: payload.repair,
-            price_min: payload.price_min, price_max: payload.price_max,
-            damage: payload.damage, image_url: imageUrl,
-          }),
+          body: JSON.stringify({ device, diagnosis, reason, customer_phone }),
         });
-        return res.status(200).json(r[0]);
-      }
-
-      // === PUBLIC TRACKING (ohne PIN!) ===
-      case 'public_tracking': {
-        // Hier KEIN PIN-Check! Aber separate Behandlung
-        return res.status(200).json({ error: 'Use GET endpoint' });
+        return res.status(200).json(result[0]);
       }
 
       default:
-        return res.status(400).json({ error: 'Unbekannte Aktion: ' + action });
+        return res.status(400).json({ error: 'Unbekannte Aktion' });
     }
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: e.message });
   }
 }
-
-export const config = {
-  api: { bodyParser: { sizeLimit: '15mb' } },
-};
