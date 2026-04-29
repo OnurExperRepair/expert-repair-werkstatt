@@ -42,7 +42,7 @@ const SHOP_NAME = 'Expert Repair';
 const SHOP_LOCATION = 'Berlin';
 const WARRANTY_MONTHS = 6;
 const TRACKING_BASE_URL = window.location.origin + '/track.html';
-const GOOGLE_REVIEW_URL = 'https://g.page/r/CXc8tGqEXAMPLE/review';
+const GOOGLE_REVIEW_URL = 'https://g.page/r/CWGp2zJjRQuaEBM/review';
 
 const PIN_STORAGE_KEY = 'expert-repair-pin';
 const ROLE_STORAGE_KEY = 'expert-repair-role';
