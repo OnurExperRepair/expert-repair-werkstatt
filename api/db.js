@@ -131,6 +131,7 @@ export default async function handler(req, res) {
           device_type: payload.device_type || null,
           damage: payload.damage || '',
           repair: payload.repair || '',
+          repair_kunde: payload.repair_kunde || null,
           price_min: Number(payload.price_min) || 0,
           price_max: Number(payload.price_max) || 0,
           duration: payload.duration || '',
