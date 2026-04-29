@@ -81,6 +81,30 @@ const api = {
   uploadAfterImage: (id, imageBase64, imageMediaType) => apiCall('/api/db', { action: 'upload_after_image', id, imageBase64, imageMediaType }),
   rejectDiagnosis: (data) => apiCall('/api/db', { action: 'reject_diagnosis', ...data }),
   diagnose: (imageBase64, mediaType, device, description) => apiCall('/api/diagnose', { imageBase64, mediaType, device, description }),
+  verifyPin: async (pin) => {
+    const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'verify_pin', pin }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `Server-Fehler ${res.status}`);
+      err.status = res.status;
+      err.remaining = data.remaining_attempts;
+      err.lockedUntil = data.locked_until;
+      throw err;
+    }
+    return data;
+  },
+  changePin: async (chefPin, targetRole, newPin) => {
+    const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'change_pin', chef_pin: chefPin, target_role: targetRole, new_pin: newPin }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Server-Fehler ${res.status}`);
+    return data;
+  },
+  listPinMeta: async (chefPin) => {
+    const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'list_pin_meta', chef_pin: chefPin }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Server-Fehler ${res.status}`);
+    return data;
+  },
 };
 
 const LANGUAGES = {
@@ -105,9 +129,9 @@ const STATUSES = {
 };
 
 const ROLES = {
-  tresen: { pin: '1111', label: 'Tresen', icon: User, color: '#e8904b' },
-  techniker: { pin: '2222', label: 'Techniker', icon: Wrench, color: '#e8b04b' },
-  chef: { pin: '3333', label: 'Chef/in', icon: BarChart3, color: '#7dd99c' },
+  tresen: { label: 'Tresen', icon: User, color: '#e8904b' },
+  techniker: { label: 'Techniker', icon: Wrench, color: '#e8b04b' },
+  chef: { label: 'Chef/in', icon: BarChart3, color: '#7dd99c' },
 };
 
 const SIX_MONTHS = 86400000 * 30 * 6;
@@ -391,10 +415,14 @@ function App() {
             </div>
           )}
           <main className="max-w-5xl mx-auto px-5 py-8">
+            {view === 'settings' && role === 'chef' && (
+              <SettingsView onBack={() => setView('home')} />
+            )}
             {view === 'home' && (
               <Home role={role} jobs={jobs} customers={customers} rejected={rejectedDiagnoses}
                 onNew={() => { setPendingDiagnosis(null); setView('diagnose'); }}
                 onList={() => setView('jobList')}
+                onSettings={() => setView('settings')}
                 onJob={(id) => { setSelectedJobId(id); setView('jobDetail'); }} />
             )}
             {view === 'diagnose' && (
@@ -491,50 +519,43 @@ function LoginScreen({ onLogin }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
+  const [lockedUntil, setLockedUntil] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!lockedUntil) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [lockedUntil]);
+
+  const lockedSeconds = lockedUntil ? Math.max(0, Math.ceil((new Date(lockedUntil).getTime() - now) / 1000)) : 0;
+  const isLocked = lockedSeconds > 0;
+  useEffect(() => { if (lockedUntil && lockedSeconds === 0) setLockedUntil(null); }, [lockedSeconds]);
 
   const checkPin = async (val) => {
     setChecking(true);
     setError('');
-    // Lokaler Rollen-Match
-    const roleEntry = Object.entries(ROLES).find(([k, v]) => v.pin === val);
-    if (!roleEntry) {
-      setError('Falscher PIN');
-      setChecking(false);
-      setTimeout(() => setPin(''), 800);
-      return;
-    }
-    // PIN für Backend-Calls speichern (alle 3 Rollen-PINs sind gültig für Backend)
-    localStorage.setItem(PIN_STORAGE_KEY, val);
-    // Test-Call gegen Backend, ob das Backend den PIN akzeptiert (oder kein PIN gesetzt ist)
     try {
-      const res = await fetch('/api/db', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-shop-pin': val },
-        body: JSON.stringify({ action: 'load_all' }),
-      });
-      if (res.status === 401) {
-        setError('PIN vom Backend abgelehnt — bitte SHOP_PIN-Variable im Vercel-Setting prüfen');
-        setChecking(false);
-        localStorage.removeItem(PIN_STORAGE_KEY);
-        setTimeout(() => setPin(''), 1500);
-        return;
-      }
-      if (!res.ok) {
-        setError('Backend-Fehler. Erneut versuchen.');
-        setChecking(false);
-        setTimeout(() => setPin(''), 1500);
-        return;
-      }
-      onLogin(roleEntry[0]);
+      const data = await api.verifyPin(val);
+      localStorage.setItem(PIN_STORAGE_KEY, val);
+      onLogin(data.role);
     } catch (err) {
-      setError('Verbindungsfehler — Internet prüfen');
+      if (err.status === 429 && err.lockedUntil) {
+        setLockedUntil(err.lockedUntil);
+        setError('Zu viele Falsch-Eingaben. Bitte 1 Minute warten.');
+      } else if (err.remaining !== undefined) {
+        setError(`Falscher PIN (noch ${err.remaining} Versuche)`);
+      } else {
+        setError(err.message || 'Falscher PIN');
+      }
+      setTimeout(() => setPin(''), 800);
+    } finally {
       setChecking(false);
-      setTimeout(() => setPin(''), 1500);
     }
   };
 
   useEffect(() => {
-    if (pin.length === 4 && !checking) {
+    if (pin.length === 6 && !checking && !isLocked) {
       checkPin(pin);
     }
   }, [pin]);
@@ -548,23 +569,20 @@ function LoginScreen({ onLogin }) {
         <span className="display-serif">Expert</span><span className="font-light" style={{ color: '#857d70' }}> Repair</span>
       </div>
       <div className="mono text-[10px] uppercase tracking-[0.25em] mb-10" style={{ color: '#857d70' }}>Werkstatt-System · Berlin</div>
-      <div className="mono text-[10px] uppercase tracking-widest mb-3" style={{ color: '#e8904b' }}>
-        {checking ? 'Prüfe...' : 'Mitarbeiter-PIN'}
+      <div className="mono text-[10px] uppercase tracking-widest mb-3" style={{ color: isLocked ? '#e87a5b' : '#e8904b' }}>
+        {checking ? 'Prüfe...' : isLocked ? `Gesperrt — ${lockedSeconds}s` : 'Mitarbeiter-PIN'}
       </div>
-      <input type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={pin}
-        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} placeholder="••••" autoFocus
-        disabled={checking}
-        className="w-48 py-5 px-6 text-3xl text-center rounded-md tracking-[0.5em]"
+      <input type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pin}
+        onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} placeholder="••••••" autoFocus
+        disabled={checking || isLocked}
+        className="w-64 py-5 px-6 text-3xl text-center rounded-md tracking-[0.4em]"
         style={{ background: '#13110e', border: `1.5px solid ${error ? '#5a3328' : '#2a2620'}`, color: '#f0e9dc' }} />
       {error && <div className="mt-3 text-sm text-center max-w-xs px-4" style={{ color: '#e87a5b' }}>{error}</div>}
-      <div className="mt-12 p-4 rounded-md max-w-xs text-center" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
-        <div className="mono text-[10px] uppercase tracking-widest mb-2" style={{ color: '#857d70' }}>PIN-Codes</div>
-        <div className="text-xs space-y-1" style={{ color: '#a89e8d' }}>
-          <div><span className="mono" style={{ color: '#e8904b' }}>1111</span> Tresen-Mitarbeiter</div>
-          <div><span className="mono" style={{ color: '#e8b04b' }}>2222</span> Techniker</div>
-          <div><span className="mono" style={{ color: '#7dd99c' }}>3333</span> Chef/in</div>
+      {!error && !checking && !isLocked && (
+        <div className="mt-3 text-xs text-center max-w-xs px-4" style={{ color: '#5c554a' }}>
+          6-stellig · Bei Falsch-Eingabe wird das Konto kurz gesperrt
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -730,7 +748,7 @@ function Header({ role, onLogout, onHome, loading, onReload }) {
   );
 }
 
-function Home({ role, jobs, customers, rejected = [], onNew, onList, onJob }) {
+function Home({ role, jobs, customers, rejected = [], onNew, onList, onSettings, onJob }) {
   const [quickSearch, setQuickSearch] = useState('');
   const stats = {
     eingegangen: jobs.filter(j => j.status === 'eingegangen').length,
@@ -860,6 +878,22 @@ function Home({ role, jobs, customers, rejected = [], onNew, onList, onJob }) {
               {jobs.length} angenommen · {rejected.length} abgelehnt
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Chef-Aktionen */}
+      {role === 'chef' && (
+        <div className="mb-8">
+          <button onClick={onSettings} className="w-full p-4 rounded-md flex items-center gap-3 text-left" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
+            <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0" style={{ background: '#1a3a2a' }}>
+              <Shield size={16} style={{ color: '#7dd99c' }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium" style={{ color: '#f0e9dc' }}>PIN-Verwaltung</div>
+              <div className="text-xs" style={{ color: '#857d70' }}>PINs für Tresen, Techniker und Chef ändern</div>
+            </div>
+            <ChevronRight size={16} style={{ color: '#5c554a' }} />
+          </button>
         </div>
       )}
 
@@ -2055,6 +2089,224 @@ function PublicTracking({ job, customer, onExit }) {
         <div className="text-center text-xs pt-6" style={{ color: '#5c554a', borderTop: '1px solid #1f1c17' }}>
           {t.shop}<br />
           <span style={{ color: '#a89e8d' }}>{SHOP_NAME} · {SHOP_LOCATION}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsView({ onBack }) {
+  const [chefPin, setChefPin] = useState('');
+  const [chefVerified, setChefVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState('');
+  const [pinMeta, setPinMeta] = useState([]);
+  const [editingRole, setEditingRole] = useState(null);
+  const [newPin, setNewPin] = useState('');
+  const [newPinConfirm, setNewPinConfirm] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const verifyChef = async () => {
+    if (chefPin.length !== 6) return;
+    setVerifying(true);
+    setError('');
+    try {
+      const data = await api.listPinMeta(chefPin);
+      setPinMeta(data.entries || []);
+      setChefVerified(true);
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setChefPin(''), 800);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const startEdit = (role) => {
+    setEditingRole(role);
+    setNewPin('');
+    setNewPinConfirm('');
+    setError('');
+    setMessage(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingRole(null);
+    setNewPin('');
+    setNewPinConfirm('');
+    setError('');
+  };
+
+  const saveNewPin = async () => {
+    setError('');
+    if (!/^\d{6}$/.test(newPin)) {
+      setError('PIN muss genau 6 Ziffern haben');
+      return;
+    }
+    if (newPin !== newPinConfirm) {
+      setError('PINs stimmen nicht überein');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.changePin(chefPin, editingRole, newPin);
+      const wasOwnChange = editingRole === 'chef';
+      const fresh = await api.listPinMeta(wasOwnChange ? newPin : chefPin);
+      setPinMeta(fresh.entries || []);
+      if (wasOwnChange) {
+        setChefPin(newPin);
+        localStorage.setItem(PIN_STORAGE_KEY, newPin);
+      }
+      setMessage(`PIN für ${ROLES[editingRole].label} aktualisiert ✓`);
+      setEditingRole(null);
+      setNewPin('');
+      setNewPinConfirm('');
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!chefVerified) {
+    return (
+      <div className="fadeup max-w-md mx-auto">
+        <button onClick={onBack} className="mono text-[10px] uppercase tracking-widest mb-4 flex items-center gap-1" style={{ color: '#857d70' }}>
+          <ArrowLeft size={12} /> Zurück
+        </button>
+        <div className="mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#7dd99c' }}>PIN-Verwaltung</div>
+        <h1 className="text-3xl mb-6">
+          <span className="display-serif">Einstellungen</span><span className="font-light" style={{ color: '#857d70' }}>.</span>
+        </h1>
+        <div className="p-5 rounded-md mb-4" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
+          <div className="flex items-start gap-3 mb-4">
+            <Shield size={18} style={{ color: '#7dd99c', flexShrink: 0, marginTop: 2 }} />
+            <div className="text-sm" style={{ color: '#a89e8d' }}>
+              Bitte zur Bestätigung den <b style={{ color: '#f0e9dc' }}>Chef-PIN</b> erneut eingeben.
+            </div>
+          </div>
+          <input type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+            value={chefPin}
+            onChange={(e) => setChefPin(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={(e) => e.key === 'Enter' && verifyChef()}
+            placeholder="••••••" autoFocus disabled={verifying}
+            className="w-full py-4 px-5 text-2xl text-center rounded-md tracking-[0.4em] mono"
+            style={{ background: '#1f1c17', border: `1px solid ${error ? '#5a3328' : '#2a2620'}`, color: '#f0e9dc' }} />
+          {error && <div className="mt-3 text-sm text-center" style={{ color: '#e87a5b' }}>{error}</div>}
+          <button onClick={verifyChef} disabled={chefPin.length !== 6 || verifying}
+            className="w-full mt-4 py-3 rounded-md font-medium disabled:opacity-40"
+            style={{ background: '#7dd99c', color: '#0a0908' }}>
+            {verifying ? 'Prüfe...' : 'Bestätigen'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fadeup max-w-2xl mx-auto">
+      <button onClick={onBack} className="mono text-[10px] uppercase tracking-widest mb-4 flex items-center gap-1" style={{ color: '#857d70' }}>
+        <ArrowLeft size={12} /> Übersicht
+      </button>
+      <div className="mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#7dd99c' }}>PIN-Verwaltung</div>
+      <h1 className="text-3xl mb-6">
+        <span className="display-serif">Einstellungen</span><span className="font-light" style={{ color: '#857d70' }}>.</span>
+      </h1>
+
+      {message && (
+        <div className="mb-4 p-3 rounded-md flex items-center gap-2" style={{ background: '#1a3a2a', border: '1px solid #2a4a3a', color: '#7dd99c' }}>
+          <Check size={16} /> <span className="text-sm">{message}</span>
+        </div>
+      )}
+
+      <div className="p-4 rounded-md mb-5" style={{ background: '#1a1410', border: '1px solid #3a2a1a' }}>
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={16} style={{ color: '#e8b04b', flexShrink: 0, marginTop: 2 }} />
+          <div className="text-xs" style={{ color: '#a89e8d', lineHeight: '1.5' }}>
+            Beim Ändern eines PINs wird der alte sofort ungültig. Notiere dir den neuen PIN sicher, bevor du speicherst.
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(ROLES).map(([roleKey, roleData]) => {
+          const meta = pinMeta.find(m => m.role === roleKey);
+          const RoleIcon = roleData.icon;
+          const isEditing = editingRole === roleKey;
+          return (
+            <div key={roleKey} className="p-4 rounded-md" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0" style={{ background: '#1f1c17' }}>
+                  <RoleIcon size={16} style={{ color: roleData.color }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium" style={{ color: '#f0e9dc' }}>{roleData.label}</div>
+                  <div className="mono text-[10px] uppercase tracking-widest" style={{ color: '#857d70' }}>
+                    {meta?.updated_at ? `Zuletzt geändert: ${formatDate(new Date(meta.updated_at).getTime())}` : '—'}
+                  </div>
+                </div>
+                {!isEditing && !editingRole && (
+                  <button onClick={() => startEdit(roleKey)}
+                    className="mono text-[10px] uppercase tracking-widest px-3 py-2 rounded"
+                    style={{ background: '#1f1c17', color: '#e8904b', border: '1px solid #2a2620' }}>
+                    PIN ändern
+                  </button>
+                )}
+              </div>
+
+              {isEditing && (
+                <div className="space-y-3 pt-3" style={{ borderTop: '1px solid #1f1c17' }}>
+                  <div>
+                    <label className="mono text-[10px] uppercase tracking-widest block mb-2" style={{ color: '#857d70' }}>
+                      Neue PIN (6 Ziffern)
+                    </label>
+                    <input type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••••" autoFocus
+                      className="w-full py-3 px-4 text-xl text-center rounded mono tracking-[0.4em]"
+                      style={{ background: '#1f1c17', border: '1px solid #2a2620', color: '#f0e9dc' }} />
+                  </div>
+                  <div>
+                    <label className="mono text-[10px] uppercase tracking-widest block mb-2" style={{ color: '#857d70' }}>
+                      Wiederholen
+                    </label>
+                    <input type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                      value={newPinConfirm}
+                      onChange={(e) => setNewPinConfirm(e.target.value.replace(/\D/g, ''))}
+                      placeholder="••••••"
+                      className="w-full py-3 px-4 text-xl text-center rounded mono tracking-[0.4em]"
+                      style={{ background: '#1f1c17', border: `1px solid ${newPinConfirm && newPin !== newPinConfirm ? '#5a3328' : '#2a2620'}`, color: '#f0e9dc' }} />
+                  </div>
+                  {error && <div className="text-sm" style={{ color: '#e87a5b' }}>{error}</div>}
+                  <div className="flex gap-2">
+                    <button onClick={saveNewPin}
+                      disabled={saving || newPin.length !== 6 || newPin !== newPinConfirm}
+                      className="flex-1 py-3 rounded font-medium disabled:opacity-40"
+                      style={{ background: '#7dd99c', color: '#0a0908' }}>
+                      {saving ? 'Speichere...' : 'PIN speichern'}
+                    </button>
+                    <button onClick={cancelEdit} disabled={saving}
+                      className="px-4 py-3 rounded text-sm"
+                      style={{ background: '#1f1c17', color: '#a89e8d', border: '1px solid #2a2620' }}>
+                      Abbrechen
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 p-4 rounded-md" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
+        <div className="mono text-[10px] uppercase tracking-widest mb-2" style={{ color: '#857d70' }}>Sicherheit</div>
+        <div className="text-xs space-y-1.5" style={{ color: '#a89e8d' }}>
+          <div>• PINs werden als Hash gespeichert — auch wir können sie nicht auslesen.</div>
+          <div>• Nach 5 Falsch-Eingaben wird das Konto für 1 Minute gesperrt.</div>
+          <div>• Empfehlung: PINs alle 3 Monate ändern oder wenn ein Mitarbeiter geht.</div>
         </div>
       </div>
     </div>
