@@ -114,19 +114,22 @@ const LANGUAGES = {
   en: { label: 'English', flag: '🇬🇧', dir: 'ltr', short: 'EN' },
   ar: { label: 'العربية', flag: '🇸🇦', dir: 'rtl', short: 'AR' },
   ru: { label: 'Русский', flag: '🇷🇺', dir: 'ltr', short: 'RU' },
+  bg: { label: 'Български', flag: '🇧🇬', dir: 'ltr', short: 'BG' },
+  ro: { label: 'Română', flag: '🇷🇴', dir: 'ltr', short: 'RO' },
+  sq: { label: 'Shqip', flag: '🇦🇱', dir: 'ltr', short: 'SQ' },
 };
 
 const STATUSES = {
   eingegangen: { label: 'Eingegangen', color: '#857d70', bg: '#1f1c17', icon: Hourglass,
-    i18n: { de: 'Eingegangen', tr: 'Alındı', en: 'Received', ar: 'تم الاستلام', ru: 'Принято' } },
+    i18n: { de: 'Eingegangen', tr: 'Alındı', en: 'Received', ar: 'تم الاستلام', ru: 'Принято', bg: 'Получено', ro: 'Primit', sq: 'I marrë' } },
   in_arbeit: { label: 'In Arbeit', color: '#e8b04b', bg: '#3a2f1a', icon: PlayCircle,
-    i18n: { de: 'In Arbeit', tr: 'Tamir Ediliyor', en: 'In Progress', ar: 'قيد الإصلاح', ru: 'В работе' } },
+    i18n: { de: 'In Arbeit', tr: 'Tamir Ediliyor', en: 'In Progress', ar: 'قيد الإصلاح', ru: 'В работе', bg: 'В процес на ремонт', ro: 'În lucru', sq: 'Në punë' } },
   wartet_auf_teile: { label: 'Wartet auf Teile', color: '#e87a5b', bg: '#3a1f1a', icon: Package,
-    i18n: { de: 'Wartet auf Teile', tr: 'Parça Bekliyor', en: 'Waiting for Parts', ar: 'بانتظار قطع الغيار', ru: 'Ожидание запчастей' } },
+    i18n: { de: 'Wartet auf Teile', tr: 'Parça Bekliyor', en: 'Waiting for Parts', ar: 'بانتظار قطع الغيار', ru: 'Ожидание запчастей', bg: 'В очакване на части', ro: 'Așteaptă piese', sq: 'Pret pjesë' } },
   fertig: { label: 'Fertig', color: '#7dd99c', bg: '#1a3a2a', icon: CheckCircle2,
-    i18n: { de: 'Fertig zur Abholung', tr: 'Teslim Almaya Hazır', en: 'Ready for Pickup', ar: 'جاهز للاستلام', ru: 'Готово к выдаче' } },
+    i18n: { de: 'Fertig zur Abholung', tr: 'Teslim Almaya Hazır', en: 'Ready for Pickup', ar: 'جاهز للاستلام', ru: 'Готово к выдаче', bg: 'Готово за получаване', ro: 'Gata de ridicare', sq: 'Gati për tërheqje' } },
   abgeholt: { label: 'Abgeholt', color: '#5c554a', bg: '#1a1815', icon: Check,
-    i18n: { de: 'Abgeholt', tr: 'Teslim Alındı', en: 'Picked Up', ar: 'تم الاستلام', ru: 'Получено' } },
+    i18n: { de: 'Abgeholt', tr: 'Teslim Alındı', en: 'Picked Up', ar: 'تم الاستلام', ru: 'Получено', bg: 'Получено', ro: 'Ridicat', sq: 'Marrë' } },
 };
 
 const ROLES = {
@@ -181,6 +184,9 @@ const TEMPLATE_LABELS = {
   en: { annahme: 'Confirm Receipt', fertig: 'Repair Done', teile: 'Waiting for Parts', erinnerung: 'Pickup Reminder', bewertung: '⭐ Request Review', individuell: 'Custom Message' },
   ar: { annahme: 'تأكيد الاستلام', fertig: 'الإصلاح جاهز', teile: 'بانتظار القطع', erinnerung: 'تذكير الاستلام', bewertung: '⭐ طلب تقييم', individuell: 'رسالة مخصصة' },
   ru: { annahme: 'Заказ принят', fertig: 'Ремонт готов', teile: 'Ожидание запчастей', erinnerung: 'Напоминание', bewertung: '⭐ Запрос отзыва', individuell: 'Своё сообщение' },
+  bg: { annahme: 'Потвърждение', fertig: 'Ремонтът е готов', teile: 'В очакване на части', erinnerung: 'Напомняне', bewertung: '⭐ Заявка за отзив', individuell: 'Лично съобщение' },
+  ro: { annahme: 'Confirmare primire', fertig: 'Reparație finalizată', teile: 'Așteaptă piese', erinnerung: 'Reamintire ridicare', bewertung: '⭐ Cere o recenzie', individuell: 'Mesaj personalizat' },
+  sq: { annahme: 'Konfirmo marrjen', fertig: 'Riparimi u krye', teile: 'Pret pjesë', erinnerung: 'Kujtues tërheqjeje', bewertung: '⭐ Kërko vlerësim', individuell: 'Mesazh personal' },
 };
 
 const buildTemplate = (key, lang, ctx) => {
@@ -225,6 +231,30 @@ const buildTemplate = (key, lang, ctx) => {
       erinnerung: `Здравствуйте, ${first}! Дружеское напоминание: Ваш ${device} готов к получению (заказ #${id}, ${price}). Можете забрать в рабочие часы.\n\nС уважением,\n${SHOP_NAME} ${SHOP_LOCATION}`,
       bewertung: `Здравствуйте, ${first}! Спасибо, что доверили нам ремонт Вашего ${device}! 🛠️\n\nЕсли Вы остались довольны, будем благодарны за короткий отзыв на Google — это очень помогает нам как маленькому семейному бизнесу:\n\n👉 ${review}\n\nСпасибо за доверие!\n${SHOP_NAME} ${SHOP_LOCATION}`,
       individuell: `Здравствуйте, ${first}!\n\n[введите сообщение здесь]\n\nС уважением,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+    },
+    bg: {
+      annahme: `Здравейте, ${first}, приехме Вашия ${device}. ✅\n\n• Ремонт: ${repair}\n• Цена: ${price}\n• Очаквано време: ${duration}\n• Номер на поръчка: #${id}\n\nПроследяване на статуса:\n${tracking}\n\nС уважение,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      fertig: `Здравейте, ${first}, Вашият ${device} е готов. ✅\n\nМожете да го вземете в работното ни време:\n• Поръчка: #${id}\n• Сума: ${price}\n• Гаранция: ${WARRANTY_MONTHS} месеца на ремонта 🛡️\n\nС уважение,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      teile: `Здравейте, ${first}, кратка информация за Вашия ${device} (поръчка #${id}): Резервните части са поръчани и ще пристигнат след 2-3 работни дни. Ще Ви уведомим веднага щом ремонтът приключи.\n\nБлагодарим за търпението!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      erinnerung: `Здравейте, ${first}, любезно напомняне: Вашият ${device} чака да бъде взет (поръчка #${id}, ${price}). Можете да го вземете в работното ни време.\n\nС уважение,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      bewertung: `Здравейте, ${first}, благодарим Ви, че ни се доверихте за ремонта на Вашия ${device}! 🛠️\n\nАко сте доволни, ще се радваме на кратък отзив в Google — много ни помага като малък семеен бизнес:\n\n👉 ${review}\n\nБлагодарим за доверието!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      individuell: `Здравейте, ${first},\n\n[въведете съобщение тук]\n\nС уважение,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+    },
+    ro: {
+      annahme: `Bună ziua, ${first}, am primit dispozitivul dumneavoastră ${device}. ✅\n\n• Reparație: ${repair}\n• Preț: ${price}\n• Durată estimată: ${duration}\n• Număr comandă: #${id}\n\nUrmăriți statusul oricând:\n${tracking}\n\nCu stimă,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      fertig: `Bună ziua, ${first}, dispozitivul dumneavoastră ${device} este reparat. ✅\n\nÎl puteți ridica în timpul programului nostru:\n• Comandă: #${id}\n• Total: ${price}\n• Garanție: ${WARRANTY_MONTHS} luni la reparație 🛡️\n\nCu stimă,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      teile: `Bună ziua, ${first}, o scurtă informare despre ${device} (comanda #${id}): Piesele de schimb au fost comandate și vor sosi în 2-3 zile lucrătoare. Vă vom anunța imediat ce reparația este finalizată.\n\nMulțumim pentru răbdare!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      erinnerung: `Bună ziua, ${first}, o reamintire prietenoasă: ${device} dumneavoastră așteaptă să fie ridicat (comanda #${id}, ${price}). Îl puteți ridica în timpul programului nostru.\n\nCu stimă,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      bewertung: `Bună ziua, ${first}, vă mulțumim că ne-ați ales pentru reparația ${device}! 🛠️\n\nDacă sunteți mulțumit, ne-ar bucura mult o scurtă recenzie pe Google — ne ajută enorm ca afacere de familie:\n\n👉 ${review}\n\nMulțumim pentru încredere!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      individuell: `Bună ziua, ${first},\n\n[scrieți mesajul aici]\n\nCu stimă,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+    },
+    sq: {
+      annahme: `Përshëndetje ${first}, e pranuam pajisjen tuaj ${device}. ✅\n\n• Riparimi: ${repair}\n• Çmimi: ${price}\n• Koha e parashikuar: ${duration}\n• Numri i porosisë: #${id}\n\nNdiqni statusin në çdo kohë:\n${tracking}\n\nMe respekt,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      fertig: `Përshëndetje ${first}, pajisja juaj ${device} është riparuar. ✅\n\nMund ta tërhiqni gjatë orarit tonë të punës:\n• Porosia: #${id}\n• Totali: ${price}\n• Garanci: ${WARRANTY_MONTHS} muaj mbi riparimin 🛡️\n\nMe respekt,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      teile: `Përshëndetje ${first}, një informacion i shkurtër për ${device} (porosia #${id}): Pjesët e këmbimit janë porositur dhe do të mbërrijnë brenda 2-3 ditëve të punës. Do t'ju njoftojmë sapo riparimi të përfundojë.\n\nFaleminderit për durimin!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      erinnerung: `Përshëndetje ${first}, një kujtues miqësor: ${device} juaj pret të tërhiqet (porosia #${id}, ${price}). Mund ta tërhiqni gjatë orarit tonë të punës.\n\nMe respekt,\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      bewertung: `Përshëndetje ${first}, faleminderit që na zgjodhët për riparimin e ${device}! 🛠️\n\nNëse jeni i kënaqur, do të vlerësonim shumë një vlerësim të shkurtër në Google — na ndihmon shumë si biznes i vogël familjar:\n\n👉 ${review}\n\nFaleminderit për besimin!\n${SHOP_NAME} ${SHOP_LOCATION}`,
+      individuell: `Përshëndetje ${first},\n\n[shkruani mesazhin këtu]\n\nMe respekt,\n${SHOP_NAME} ${SHOP_LOCATION}`,
     },
   };
   return T[lang]?.[key] || T.de[key];
