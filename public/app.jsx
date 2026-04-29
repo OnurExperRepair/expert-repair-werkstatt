@@ -81,7 +81,8 @@ const api = {
   updatePartsNotes: (id, parts_notes) => apiCall('/api/db', { action: 'update_job_parts_notes', id, parts_notes }),
   uploadAfterImage: (id, imageBase64, imageMediaType) => apiCall('/api/db', { action: 'upload_after_image', id, imageBase64, imageMediaType }),
   rejectDiagnosis: (data) => apiCall('/api/db', { action: 'reject_diagnosis', ...data }),
-  diagnose: (imageBase64, mediaType, device, description) => apiCall('/api/diagnose', { imageBase64, mediaType, device, description }),
+  diagnose: (imageBase64, mediaType, device, description, customer_lang) => apiCall('/api/diagnose', { imageBase64, mediaType, device, description, customer_lang }),
+  translate: (text, target_lang) => apiCall('/api/translate', { text, target_lang }),
   verifyPin: async (pin) => {
     const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'verify_pin', pin }) });
     const data = await res.json().catch(() => ({}));
@@ -261,7 +262,7 @@ const buildTemplate = (key, lang, ctx) => {
 };
 
 const waTemplates = (job, customer, lang) => {
-  const ctx = { first: customer.name.split(' ')[0], device: job.device, repair: job.repair,
+  const ctx = { first: customer.name.split(' ')[0], device: job.device, repair: (lang !== 'de' && job.repair_kunde) ? job.repair_kunde : job.repair,
     price: priceStr(job), duration: job.duration, id: String(job.id).toUpperCase(),
     tracking: trackingUrl(job.id), review: GOOGLE_REVIEW_URL };
   const labels = TEMPLATE_LABELS[lang] || TEMPLATE_LABELS.de;
@@ -483,6 +484,7 @@ function App() {
                       device_type: jobData.diagnosis_data?.geraete_typ,
                       damage: jobData.damage,
                       repair: jobData.repair,
+                      repair_kunde: jobData.repair_kunde || null,
                       price_min: jobData.price_min,
                       price_max: jobData.price_max,
                       duration: jobData.duration,
@@ -1108,6 +1110,23 @@ function NewJobForm({ diagnosis, customers, jobs, onCancel, onCreate, onReject }
   const [duration, setDuration] = useState(d.dauer || '');
   const [deposit, setDeposit] = useState(0);
   const [editMode, setEditMode] = useState(false);
+  const [repairKunde, setRepairKunde] = useState('');
+  const [translating, setTranslating] = useState(false);
+
+  // Wenn Sprache != 'de' und repair gesetzt: automatisch übersetzen
+  useEffect(() => {
+    if (language === 'de' || !repair) {
+      setRepairKunde('');
+      return;
+    }
+    let cancelled = false;
+    setTranslating(true);
+    api.translate(repair, language)
+      .then(data => { if (!cancelled) setRepairKunde(data.translated || ''); })
+      .catch(err => { console.error('Translate failed:', err); if (!cancelled) setRepairKunde(''); })
+      .finally(() => { if (!cancelled) setTranslating(false); });
+    return () => { cancelled = true; };
+  }, [language, repair]);
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(name.toLowerCase()) || c.phone.includes(name)
@@ -1127,6 +1146,7 @@ function NewJobForm({ diagnosis, customers, jobs, onCancel, onCreate, onReject }
     const job = {
       id: 'j' + Date.now(), customer_id: customer.id,
       device, damage: d.schadensbild, repair,
+      repair_kunde: repairKunde || null,
       price_min: Number(priceMin), price_max: Number(priceMax), duration,
       deposit: Number(deposit) || 0,
       status: 'eingegangen', technician_notes: '',
@@ -1378,6 +1398,24 @@ function NewJobForm({ diagnosis, customers, jobs, onCancel, onCreate, onReject }
             Diese Reparatur erhält automatisch <span style={{ color: '#7dd99c' }}>{WARRANTY_MONTHS} Monate Garantie</span>.
           </div>
         </div>
+
+        {language !== 'de' && (
+          <div className="p-3 rounded-md flex items-start gap-3" style={{ background: '#13110e', border: '1px solid #1f1c17' }}>
+            <Globe size={16} style={{ color: '#e8b04b', flexShrink: 0, marginTop: 2 }} />
+            <div className="text-xs flex-1" style={{ color: '#a89e8d' }}>
+              {translating ? (
+                <span>Übersetze Reparatur-Empfehlung auf {LANGUAGES[language].label}…</span>
+              ) : repairKunde ? (
+                <>
+                  <span style={{ color: '#7dd99c' }}>✓ Übersetzung bereit</span> — wird automatisch in WhatsApp-Nachrichten verwendet:
+                  <div className="mt-1.5 p-2 rounded text-xs" style={{ background: '#1f1c17', color: '#f0e9dc' }}>{repairKunde}</div>
+                </>
+              ) : (
+                <span>Übersetzung wird beim Senden generiert…</span>
+              )}
+            </div>
+          </div>
+        )}
 
         <button onClick={create} disabled={!name || !phone} className="w-full py-4 rounded-md font-medium flex items-center justify-center gap-2 disabled:opacity-40" style={{ background: '#e8904b', color: '#0a0908' }}>
           Auftrag anlegen <Check size={18} />
