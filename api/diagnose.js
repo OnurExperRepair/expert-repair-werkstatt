@@ -1,20 +1,79 @@
 // Vercel Serverless Function — Diagnose
-// Empfängt Bild vom Frontend, ruft Anthropic API mit verstecktem Key auf
+// Ruft Anthropic API mit Bild + Beschreibung auf, gibt strukturierte JSON-Diagnose zurück.
+// SECURITY: Authentifiziert via x-shop-pin Header gegen app_settings-Tabelle.
+// I18N: Wenn customer_lang gesetzt ist (und !== 'de'), gibt KI zusätzlich eine
+//       Reparatur-Empfehlung in der Kundensprache zurück.
+
+import crypto from 'crypto';
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+
+const LANG_NAMES = {
+  de: 'Deutsch',
+  tr: 'Türkisch',
+  en: 'Englisch',
+  ar: 'Arabisch',
+  ru: 'Russisch',
+  bg: 'Bulgarisch',
+  ro: 'Rumänisch',
+  sq: 'Albanisch',
+};
+
+async function authenticate(req) {
+  const pin = req.headers['x-shop-pin'];
+  if (!pin) {
+    const e = new Error('Auth fehlt'); e.statusCode = 401; throw e;
+  }
+  const hash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+  const url = `${SUPABASE_URL}/rest/v1/app_settings?pin_hash=eq.${encodeURIComponent(hash)}`;
+  const res = await fetch(url, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+    },
+  });
+  if (!res.ok) {
+    const e = new Error('Auth-Check fehlgeschlagen'); e.statusCode = 500; throw e;
+  }
+  const rows = await res.json();
+  if (!rows || rows.length === 0) {
+    const e = new Error('PIN ungültig'); e.statusCode = 401; throw e;
+  }
+  return rows[0].role;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Methode nicht erlaubt' });
 
-  const requiredPin = process.env.SHOP_PIN;
-  if (requiredPin && req.headers['x-shop-pin'] !== requiredPin) {
-    return res.status(401).json({ error: 'PIN falsch' });
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return res.status(500).json({ error: 'Supabase-Verbindung fehlt' });
+  }
+
+  try {
+    await authenticate(req);
+  } catch (e) {
+    return res.status(e.statusCode || 401).json({ error: e.message });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY fehlt' });
 
   try {
-    const { imageBase64, mediaType, device, description } = req.body;
+    const { imageBase64, mediaType, device, description, customer_lang } = req.body;
     if (!imageBase64 || !mediaType) return res.status(400).json({ error: 'Bild fehlt' });
+
+    const langCode = customer_lang && LANG_NAMES[customer_lang] ? customer_lang : 'de';
+    const langName = LANG_NAMES[langCode];
+    const needsTranslation = langCode !== 'de';
+
+    const translationField = needsTranslation
+      ? `\n  "reparatur_empfehlung_kunde": "Die Reparatur-Empfehlung übersetzt auf ${langName}. Klar, höflich, kundenfreundlich. WICHTIG: Verwende echte ${langName}-Schrift/Buchstaben, KEINE Transliteration. Nicht zu technisch — der Kunde muss verstehen was gemacht wird und warum.",`
+      : '';
+
+    const translationInstruction = needsTranslation
+      ? `\n\nWICHTIG ZU "reparatur_empfehlung_kunde": Schreibe diese Empfehlung in flüssigem ${langName} (echte Schrift). Erkläre dem Kunden in 1-2 Sätzen was repariert wird und ggf. warum. Höflich und kundenfreundlich. Beispiel-Stil auf Deutsch: "Wir empfehlen einen Display-Tausch inkl. Touch-Test." → bitte sinngemäß auf ${langName}.`
+      : '';
 
     const prompt = `Du bist Diagnose-Assistent von "Expert Repair", Berlin. Analysiere das Bild.
 
@@ -38,33 +97,30 @@ Tablets:
 - Display: 100-400€
 - Akku: 80-150€
 
+Smartwatches:
+- Display: 80-200€
+- Akku: 60-120€
+
 Laptops/MacBooks:
-- Display-Tausch: 200-600€ (MacBook 350-700€)
-- Tastatur: 80-200€ (MacBook 250-450€ wegen TopCase)
-- Akku: 80-180€ (MacBook 120-280€)
-- Lüfter-Reinigung & Wärmeleitpaste: 60-120€
-- Wasserschaden-Diagnose: 80-150€ Pauschale (Reparatur extra)
-- Mainboard-Reparatur: 150-450€
+- Display: 150-500€
+- Akku: 80-200€
+- Tastatur: 100-300€
+- Lüfter/Reinigung: 50-120€
+- SSD-Tausch: 80-200€ + Teile
 
 Konsolen:
 - HDMI-Port: 80-150€
-- Reinigung & Wärmeleitpaste: 60-100€
-- Laufwerk-Tausch: 80-150€
-- Joycon (Switch): 40-70€
-- Controller-Stick-Drift: 40-80€
+- Lüfter/Reinigung: 50-100€
+- Controller: 30-80€
 
-Kunde sagt:
-- Gerät: ${device || 'nicht angegeben'}
-- Beschreibung: ${description || 'keine'}
+Antworte STRENG als JSON, keine Markdown-Blöcke, kein Text drumherum:
 
-Antworte AUSSCHLIESSLICH als gültiges JSON, ohne Markdown-Codeblöcke:
 {
-  "geraet_erkannt": "präzise Bezeichnung",
-  "geraete_typ": "smartphone|tablet|smartwatch|laptop|macbook|konsole",
-  "vertrauen": "hoch|mittel|niedrig",
-  "schadensbild": "1-2 Sätze",
+  "geraet_erkannt": "z.B. 'iPhone 13 Pro' oder 'HP Envy x360 (Laptop)' — sei spezifisch",
+  "geraete_typ": "smartphone|tablet|smartwatch|laptop|macbook|konsole|andere",
+  "schadensbild": "1-2 Sätze, was du im Bild siehst",
   "schaeden": [{"typ":"...","schwere":"leicht|mittel|schwer","details":"..."}],
-  "reparatur_empfehlung": "1-2 Sätze",
+  "reparatur_empfehlung": "1-2 Sätze auf Deutsch, was repariert werden sollte und warum",${translationField}
   "preis_min": Zahl,
   "preis_max": Zahl,
   "dauer": "z.B. '30-60 Min'",
@@ -79,7 +135,10 @@ Antworte AUSSCHLIESSLICH als gültiges JSON, ohne Markdown-Codeblöcke:
 }
 
 Bei Display-Totalschaden, Wasserschaden, Kurzschluss: funktionstest_eingeschraenkt=true.
-Bei Akku-Tausch oder kleinen Display-Rissen mit funktionierendem Touch: false.`;
+Bei Akku-Tausch oder kleinen Display-Rissen mit funktionierendem Touch: false.${translationInstruction}
+
+${device ? `\nGerätemodell laut Kunde: ${device}` : ''}
+${description ? `\nKunde sagt: ${description}` : ''}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -104,17 +163,13 @@ Bei Akku-Tausch oder kleinen Display-Rissen mit funktionierendem Touch: false.`;
     if (!response.ok) {
       const errText = await response.text();
       console.error('Anthropic API error:', response.status, errText);
-      return res.status(response.status).json({ error: 'KI-Service nicht erreichbar' });
+      return res.status(500).json({ error: `Anthropic API: ${response.status}` });
     }
 
     const data = await response.json();
     return res.status(200).json(data);
-  } catch (err) {
-    console.error('Server error:', err);
-    return res.status(500).json({ error: err.message || 'Unbekannter Fehler' });
+  } catch (e) {
+    console.error('[api/diagnose] Error:', e);
+    return res.status(500).json({ error: e.message });
   }
 }
-
-export const config = {
-  api: { bodyParser: { sizeLimit: '15mb' } },
-};
