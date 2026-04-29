@@ -1,14 +1,8 @@
 // Vercel Serverless Function — Datenbank-Operationen
-// FIXES (gegenüber alter Version):
-//  • update_job_status / update_job_notes / update_job_parts_notes / upload_after_image
-//    lasen `payload.jobId`, Frontend sendet aber `payload.id`
-//    → Postgres bekam `id=eq.undefined` → "invalid input syntax for type bigint"
-//  • create_job schrieb in alte Spalten (issue_summary, price_estimate, time_estimate,
-//    before_image_url, after_image_url), Frontend liest neue Spalten
-//    (damage, repair, price_min, price_max, duration, image_url, image_after_url)
-//    → Preise & Bilder waren null
-//  • update_job_parts_notes Handler hat ganz gefehlt
-//  • reject_diagnosis Feld-Mapping war komplett falsch
+// SECURITY: Jeder Request muss einen gültigen PIN im x-shop-pin Header mitbringen.
+// Der PIN wird gegen die app_settings-Tabelle (SHA-256-Hash) geprüft.
+
+import crypto from 'crypto';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -51,10 +45,26 @@ async function uploadImage(base64Data, mediaType, fileName) {
   return `${SUPABASE_URL}/storage/v1/object/public/repair-images/${fileName}`;
 }
 
-// Verhindert, dass `undefined` als String in einer SQL-URL landet (bigint-Crash).
+function sha256(input) {
+  return crypto.createHash('sha256').update(String(input)).digest('hex');
+}
+
+async function authenticate(req) {
+  const pin = req.headers['x-shop-pin'];
+  if (!pin) {
+    const e = new Error('Auth fehlt'); e.statusCode = 401; throw e;
+  }
+  const hash = sha256(pin);
+  const rows = await supabase(`app_settings?pin_hash=eq.${encodeURIComponent(hash)}`);
+  if (!rows || rows.length === 0) {
+    const e = new Error('PIN ungültig'); e.statusCode = 401; throw e;
+  }
+  return rows[0].role;
+}
+
 function requireId(id, label = 'id') {
   if (id === undefined || id === null || id === '' || id === 'undefined') {
-    throw new Error(`${label} fehlt im Request — Frontend muss "id" mitsenden`);
+    throw new Error(`${label} fehlt im Request`);
   }
   return id;
 }
@@ -63,14 +73,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
-    return res.status(500).json({ error: 'Supabase-Verbindung fehlt (SUPABASE_URL / SUPABASE_SERVICE_KEY)' });
+    return res.status(500).json({ error: 'Supabase-Verbindung fehlt' });
   }
 
   try {
+    // PIN-Check vor JEDEM Request
+    const role = await authenticate(req);
+
     const { action, ...payload } = req.body || {};
 
     switch (action) {
-      // ------------------------------------------------------
       case 'load_all': {
         const [customers, jobs, history, rejected] = await Promise.all([
           supabase('customers?order=created_at.desc'),
@@ -92,7 +104,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ customers, jobs: jobsWithHistory, rejected });
       }
 
-      // ------------------------------------------------------
       case 'create_customer': {
         const c = await supabase('customers', {
           method: 'POST',
@@ -106,7 +117,6 @@ export default async function handler(req, res) {
         return res.status(200).json(c[0]);
       }
 
-      // ------------------------------------------------------
       case 'create_job': {
         let imageUrl = null;
         if (payload.imageBase64 && payload.imageMediaType) {
@@ -154,7 +164,6 @@ export default async function handler(req, res) {
         return res.status(200).json(j[0]);
       }
 
-      // ------------------------------------------------------
       case 'update_job_status': {
         const id = requireId(payload.id, 'job id');
         const { status, note } = payload;
@@ -169,7 +178,6 @@ export default async function handler(req, res) {
         return res.status(200).json(j[0]);
       }
 
-      // ------------------------------------------------------
       case 'update_job_notes': {
         const id = requireId(payload.id, 'job id');
         const j = await supabase(`jobs?id=eq.${id}`, {
@@ -182,7 +190,6 @@ export default async function handler(req, res) {
         return res.status(200).json(j[0]);
       }
 
-      // ------------------------------------------------------
       case 'update_job_parts_notes': {
         const id = requireId(payload.id, 'job id');
         const j = await supabase(`jobs?id=eq.${id}`, {
@@ -195,7 +202,6 @@ export default async function handler(req, res) {
         return res.status(200).json(j[0]);
       }
 
-      // ------------------------------------------------------
       case 'upload_after_image': {
         const id = requireId(payload.id, 'job id');
         const { imageBase64, imageMediaType } = payload;
@@ -219,7 +225,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // ------------------------------------------------------
       case 'reject_diagnosis': {
         let imageUrl = null;
         if (payload.imageBase64 && payload.imageMediaType) {
@@ -242,12 +247,12 @@ export default async function handler(req, res) {
         return res.status(200).json(r[0]);
       }
 
-      // ------------------------------------------------------
       default:
         return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
     }
   } catch (e) {
     console.error('[api/db] Error:', e);
-    return res.status(500).json({ error: e.message });
+    const code = e.statusCode || 500;
+    return res.status(code).json({ error: e.message });
   }
 }
